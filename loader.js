@@ -271,7 +271,7 @@
               text = ansiHTML(text);
 
               if (element) {
-                element.value += text + "<br>";
+                element.innerHTML += text + "<br>";
                 element.scrollTop = element.scrollHeight; // focus on bottom
               }
             };
@@ -312,7 +312,7 @@
               if (GPAC.no_log)
                 console.log(text);
               else if (element) {
-                element.value += text + "<br>";
+                element.innerHTML += text + "<br>";
                 element.scrollTop = element.scrollHeight; // focus on bottom
               }
             };
