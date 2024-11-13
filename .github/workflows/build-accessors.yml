@@ -29,12 +29,11 @@ jobs:
     - name: Build
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
 
-    - name: Release
-      uses: softprops/action-gh-release@v2
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
       with:
-        tag_name: ${{env.TAG_NUMBER}}
-        token : ${{ secrets.RELEASE_TOKEN }}
-        files: |
+        name: accessor-build
+        path: |
           build/${{ env.TAG_NAME }}_${{env.TAG_NUMBER}}.wasm
           build/${{ env.TAG_NAME }}_${{env.TAG_NUMBER}}.js
 
