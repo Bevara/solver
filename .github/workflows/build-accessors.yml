@@ -32,7 +32,7 @@ jobs:
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: accessor-build
+        name: solver
         path: |
           build/${{ env.TAG_NAME }}_${{env.TAG_NUMBER}}.wasm
           build/${{ env.TAG_NAME }}_${{env.TAG_NUMBER}}.js
