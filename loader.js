@@ -368,6 +368,11 @@
       register_fns.push("_resample_register");
       register_fns.push("_compositor_register");
 
+      let vbench = false;
+      if (m.data.vbench != null) {
+        vbench = true;
+      }
+
       if (m.data.src) {
         register_fns.push("_fin_register");
         const src = m.data.src;
@@ -375,7 +380,12 @@
         var fname = src.split('/').pop();
         const data = await response.arrayBuffer();
         FS.writeFile(fname, new Uint8Array(data));
-        args.push("-i");
+        if (vbench == true){
+          args.push("-vbench");
+        }else{
+          args.push("-i");
+        }
+
         args.push(fname);
       }
 
@@ -389,7 +399,7 @@
         register_fns.push("_fout_register");
         args.push("-o");
         args.push(m.data.dst);
-      } else {
+      } else if (vbench == false){
         register_fns.push("_aout_register");
         register_fns.push("_vout_register");
         args.push("aout");
