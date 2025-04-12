@@ -368,11 +368,6 @@
       register_fns.push("_resample_register");
       register_fns.push("_compositor_register");
 
-      let vbench = false;
-      if (m.data.vbench != null) {
-        vbench = true;
-      }
-
       if (m.data.src) {
         register_fns.push("_fin_register");
         const src = m.data.src;
@@ -380,12 +375,7 @@
         var fname = src.split('/').pop();
         const data = await response.arrayBuffer();
         FS.writeFile(fname, new Uint8Array(data));
-        if (vbench == true){
-          args.push("-vbench");
-        }else{
-          args.push("-i");
-        }
-
+        args.push("-i");
         args.push(fname);
       }
 
@@ -399,16 +389,20 @@
         register_fns.push("_fout_register");
         args.push("-o");
         args.push(m.data.dst);
-      } else if (vbench == false){
+      } else if (m.data.vbench == false){
         register_fns.push("_aout_register");
         register_fns.push("_vout_register");
-        args.push("aout");
 
         if (m.data.width != null && m.data.height != null) {
           args.push("vout:wsize=" + m.data.width + "x" + m.data.height);
+          args.push("aout");
         } else {
           args.push("vout");
+          args.push("aout");
         }
+      }else{
+        register_fns.push("_vout_register");
+        args.push("vout:!vsync");
       }
 
       if (m.data.useWebcodec) {
@@ -428,7 +422,7 @@
       }
 
       if (m.data.showReport != null) {
-        args.push("-r");
+        args.push("-r=");
       }
 
       if (m.data.showLogs != null) {
