@@ -1,0 +1,39 @@
+name: Build solver
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  BUILD_TYPE: Release
+  EMCC_VERSION: 3.1.56
+  TAG_NUMBER: 1
+  TAG_NAME: solver
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: mymindstorm/setup-emsdk@v14
+      with:
+        version: ${{env.EMCC_VERSION}}
+
+    - uses: actions/checkout@v4
+
+    - name: Configure
+      run: emcmake cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: solver
+        path: |
+          build/${{ env.TAG_NAME }}_${{env.TAG_NUMBER}}.wasm
+          build/${{ env.TAG_NAME }}_${{env.TAG_NUMBER}}.js
+

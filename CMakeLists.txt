@@ -39,11 +39,11 @@ SET(EXTERNAL_RUNTIME
 add_executable(solver_${VERSION} ${SOLVER_SRC})
 
 SET(JS_RUNTIME
-  ${CMAKE_SOURCE_DIR}/loader.js
+  ${CMAKE_CURRENT_SOURCE_DIR}/loader.js
 )
 
 set_target_properties( solver_${VERSION}
-                            PROPERTIES 
+                            PROPERTIES
                                 #LINK_FLAGS "${USE_FLAGS} -s FETCH -s USE_ZLIB=1 -s USE_SDL=2 -s USE_FREETYPE=1 -s MAIN_MODULE=2 -s TOTAL_MEMORY=128MB --no-entry -s MODULARIZE=1 -s --extern-post-js=${JS_RUNTIME} EXPORTED_RUNTIME_METHODS=${EXTERNAL_RUNTIME} -s EXPORTED_FUNCTIONS=${EXTERNAL_FN} -s ERROR_ON_UNDEFINED_SYMBOLS=0"
                                 LINK_FLAGS "${USE_FLAGS} -sALLOW_MEMORY_GROWTH -sWASM_BIGINT -s MAIN_MODULE=2 -s EXPORT_NAME=libgpac -s USE_ZLIB=1 -s USE_SDL=2 -s USE_FREETYPE=1 -s TOTAL_MEMORY=128MB --no-entry -s MODULARIZE=1 -s EXPORTED_FUNCTIONS=[${EXPORTED_FUNCTIONS}] -s --extern-post-js=${JS_RUNTIME} EXPORTED_RUNTIME_METHODS=${EXTERNAL_RUNTIME} -s ERROR_ON_UNDEFINED_SYMBOLS=0"
                                 )
@@ -54,9 +54,9 @@ target_link_libraries(solver_${VERSION}
   ${CMAKE_CURRENT_SOURCE_DIR}/lib/libgpac_static.a
 )
 
-target_include_directories(solver_${VERSION} PRIVATE 
-  ${CMAKE_SOURCE_DIR}/include 
+target_include_directories(solver_${VERSION} PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_directories(solver_${VERSION} PRIVATE   
+target_link_directories(solver_${VERSION} PRIVATE
 ${GPAC_BINARIES}/bin/gcc)
