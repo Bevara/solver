@@ -2,6 +2,19 @@
   const ENVIRONMENT_IS_WEB = typeof window == 'object';
   const ENVIRONMENT_IS_WORKER = typeof importScripts == 'function';
 
+  if (ENVIRONMENT_IS_WORKER) {
+    const oldError = console.error;
+    console.error = function (...args) {
+      postMessage({ exit_code: -1, printErr: "WORKER CONSOLE.ERROR: " + args.join(' ') });
+      if (oldError) oldError.apply(console, args);
+    };
+    const oldWarn = console.warn;
+    console.warn = function (...args) {
+      postMessage({ exit_code: -1, printErr: "WORKER CONSOLE.WARN: " + args.join(' ') });
+      if (oldWarn) oldWarn.apply(console, args);
+    };
+  }
+
   // Include ANSI escape codes convert
   // @link: https://www.npmjs.com/package/ansi-html
   // Reference to https://github.com/sindresorhus/ansi-regex
@@ -233,7 +246,7 @@
       let args = [];
 
       params["locateFile"] = function (path, scriptDirectory) {
-        if (path == "solver_1.wasm" && m.data.wasmBinaryFile) {
+        if (path.includes("solver") && path.endsWith(".wasm") && m.data.wasmBinaryFile) {
           return m.data.wasmBinaryFile;
         }
         return path;
@@ -320,12 +333,6 @@
         }();
       }
 
-      let register_fns = [];
-      params["gf_fs_reg_all"] = (fsess, a_sess) => {
-        const filters = register_fns.map(filter => module[filter](a_sess));
-        filters.map(filter => module.ccall('gf_fs_add_filter_register', null, ['number', 'number'], [fsess, filter]));
-      };
-
       let on_done_resolve = null;
       let on_done_reject = null;
 
@@ -359,17 +366,77 @@
         }
       };
 
-      module = await libgpac(params);
+      try {
+        module = await libgpac(params);
+      } catch (e) {
+        console.log(e);
+        if (ENVIRONMENT_IS_WORKER) {
+          postMessage({ exit_code: -1, printErr: "WORKER EXCEPTION in libgpac: " + (e.stack || e) });
+        } else if (ENVIRONMENT_IS_WEB) {
+          if (on_done_reject) on_done_reject(e);
+        }
+        return;
+      }
       const FS = module['FS'];
 
 
+      //From gpac_pre.js
+      const SIZE_I32 = Uint32Array.BYTES_PER_ELEMENT;
+      module["SIZE_I32"] = SIZE_I32;
+      function stringToPtr(str) {
+        const len = module["lengthBytesUTF8"](str) + 1;
+        const ptr = module["_malloc"](len);
+        module["stringToUTF8"](str, ptr, len);
+
+        return ptr;
+      }
+      module["stringsToPtr"] = stringsToPtr;
+
+      function stringsToPtr(strs) {
+        const len = strs.length;
+        const ptr = module["_malloc"](len * SIZE_I32);
+        for (let i = 0; i < len; i++) {
+          module["setValue"](ptr + SIZE_I32 * i, stringToPtr(strs[i]), "i32");
+        }
+
+        return ptr;
+      }
+
+      module["stringToPtr"] = stringToPtr;
+
+      function registerFilter(filter_name, register_func_name) {
+        const reg_fn = module[register_func_name];
+
+        if (typeof reg_fn !== 'function') {
+          console.error(`Can't find function in loader : ${register_func_name}`);
+          return false;
+        }
+
+        const funcPtr = module.addFunction(reg_fn, 'ip');
+        const namePtr = module.stringToPtr(filter_name);
+
+        try {
+          module.ccall(
+            'gf_filter_auto_register',
+            null,
+            ['number', 'number'],
+            [namePtr, funcPtr]
+          );
+          console.log(`Filter "${filter_name}" has been registered by the loader.`);
+        } catch {
+          console.log(`Error : Filter "${filter_name}" has not been registered by the loader.`);
+        } finally {
+          module._free(namePtr);
+        }
+      }
+
       // Reframer and resampler
-      register_fns.push("_reframer_register");
-      register_fns.push("_resample_register");
-      register_fns.push("_compositor_register");
+      registerFilter("reframer", "_reframer_register");
+      registerFilter("resample", "_resample_register");
+      registerFilter("compositor", "_compositor_register");
 
       if (m.data.src) {
-        register_fns.push("_fin_register");
+        registerFilter("fin", "_fin_register");
         const src = m.data.src;
         const response = await fetch(src);
         var fname = src.split('/').pop();
@@ -385,13 +452,13 @@
 
 
       if (m.data.dst) {
-        register_fns.push("_writegen_register");
-        register_fns.push("_fout_register");
+        registerFilter("writegen", "_writegen_register");
+        registerFilter("fout", "_fout_register");
         args.push("-o");
         args.push(m.data.dst);
-      } else if (m.data.vbench == false){
-        register_fns.push("_aout_register");
-        register_fns.push("_vout_register");
+      } else if (m.data.vbench == false) {
+        registerFilter("aout", "_aout_register");
+        registerFilter("vout", "_vout_register");
 
         if (m.data.width != null && m.data.height != null) {
           args.push("vout:wsize=" + m.data.width + "x" + m.data.height);
@@ -400,18 +467,16 @@
           args.push("vout");
           args.push("aout");
         }
-      }else{
-        register_fns.push("_vout_register");
+      } else {
+        registerFilter("vout", "_vout_register");
         args.push("vout:!vsync");
       }
 
       if (m.data.useWebcodec) {
-        register_fns.push("_wcdec_register");
-        register_fns.push("_wcenc_register");
-        register_fns.push("_webgrab_register");
+        registerFilter("wcdec", "_wcdec_register");
+        registerFilter("wcenc", "_wcenc_register");
+        registerFilter("webgrab", "_webgrab_register");
       }
-
-      register_fns = register_fns.concat(Object.keys(module).filter(x => x.startsWith("dynCall_") && x.endsWith("_register")));
 
       if (m.data.showStats != null) {
         args.push("-stats");
@@ -447,18 +512,12 @@
       function call_gpac() {
 
         //FIXME
-        libgpac.gf_fs_reg_all = params["gf_fs_reg_all"];
         libgpac.gpac_done = params["gpac_done"];
 
         GPAC.stack = module.stackSave();
         args.unshift("gpac");
         var argc = args.length;
-        var argv = module.stackAlloc((argc + 1) * 4);
-        var argv_ptr = argv >> 2;
-        args.forEach(arg => {
-          module.HEAP32[argv_ptr++] = module.allocateUTF8OnStack(arg);
-        });
-        module.HEAP32[argv_ptr] = 0;
+        var argv = module.stringsToPtr(args);
 
         //const gpac_em_sig_handler = module.cwrap('gpac_em_sig_handler', null, ['number']);
         //gpac_em_sig_handler(4);
@@ -469,6 +528,11 @@
           //unwind thrown by emscripten main
           if (e != 'unwind') {
             console.log(e);
+            if (ENVIRONMENT_IS_WORKER) {
+              postMessage({ exit_code: -1, printErr: "WORKER EXCEPTION: " + (e.stack || e) });
+            } else if (ENVIRONMENT_IS_WEB) {
+              if (on_done_reject) on_done_reject(e);
+            }
           }
         }
       };
