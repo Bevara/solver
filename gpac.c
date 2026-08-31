@@ -281,7 +281,7 @@ static int gpac_exit_fun(int code)
 #endif
 
 	MAIN_THREAD_EM_ASM({
-		if (typeof libgpac.gpac_done == 'function') libgpac.gpac_done($0);
+		if (typeof Module.gpac_done == 'function') Module.gpac_done($0);
 	}, code);
 #endif
 
@@ -1729,7 +1729,7 @@ static void *_main_thread(void *_ptr)
 		//only for mp4box, for gpac we do this in gpac_exit_fun to deal with step mode
 		reset_em_thread();
 		MAIN_THREAD_EM_ASM({
-			if (typeof libgpac.gpac_done == 'function') libgpac.gpac_done($0);
+			if (typeof Module.gpac_done == 'function') Module.gpac_done($0);
 		}, ret_code);
 	} else {
 		ret_code = gpac_main(run_args.argc, run_args.argv);
@@ -1800,8 +1800,8 @@ int main(int argc, char **argv)
 	if (is_mp4box) {
 		ret_code = mp4box_main(argc, argv);
 		EM_ASM({
-			if (typeof libgpac.gpac_done == 'function')
-				libgpac.gpac_done($0);
+			if (typeof Module.gpac_done == 'function')
+				Module.gpac_done($0);
 		}, ret_code);
 	} else {
 		ret_code = gpac_main(argc, argv);

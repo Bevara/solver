@@ -348,6 +348,56 @@
        * mode calls the handler directly (no structured clone involved). */
       let progressPollTimer = null;
       let progressReadOffset = 0;
+      /* Progressive INPUT download - see the matching, more detailed
+       * comment in solver_with_webcodecs/loader.js. Streams the source
+       * into a GF_FileIO-backed buffer (webstream_* in in_file.c) exposed
+       * to GPAC as a "gfio://..." URL, instead of blocking on the full
+       * fetch()+FS.writeFile below, so GPAC can start reading before the
+       * whole source has downloaded. */
+      let webStreamCtx = null;
+      async function streamSrcToGfio(src, fname) {
+        const webstream_create = module.cwrap('webstream_create', 'number', ['string']);
+        const webstream_get_url = module.cwrap('webstream_get_url', 'string', ['number']);
+        const webstream_push = module.cwrap('webstream_push', null, ['number', 'number', 'number']);
+        const webstream_done = module.cwrap('webstream_done', null, ['number', 'bigint']);
+
+        const wsCtx = webstream_create(fname);
+        const gfioUrl = webstream_get_url(wsCtx);
+
+        const response = await fetch(src);
+        const contentLength = Number(response.headers.get('Content-Length') || 0);
+
+        function pushChunk(u8) {
+          if (!u8 || !u8.length) return;
+          // Heap allocation, not ccall's 'array' arg type - that copies
+          // through the WASM *stack* (default 64KB), which overflows for
+          // fetch chunks that can be hundreds of KB.
+          const ptr = module._malloc(u8.length);
+          module.HEAPU8.set(u8, ptr);
+          webstream_push(wsCtx, ptr, u8.length);
+          module._free(ptr);
+        }
+
+        (async () => {
+          try {
+            if (response.body && response.body.getReader) {
+              const reader = response.body.getReader();
+              for (; ;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                pushChunk(value);
+              }
+            } else {
+              pushChunk(new Uint8Array(await response.arrayBuffer()));
+            }
+          } catch (e) {
+            console.log('progressive input download failed: ' + e.message);
+          }
+          webstream_done(wsCtx, BigInt(contentLength));
+        })();
+
+        return { url: gfioUrl, ctx: wsCtx };
+      }
       function flushProgressive() {
         if (!m.data.dst || !m.data.onProgress) return;
         try {
@@ -377,6 +427,11 @@
           clearInterval(progressPollTimer);
           flushProgressive();
           if (m.data.onProgressDone) m.data.onProgressDone();
+        }
+
+        if (webStreamCtx) {
+          module.cwrap('webstream_destroy', null, ['number'])(webStreamCtx);
+          webStreamCtx = null;
         }
 
         if (m.data.dst && !m.data.progressive) {
@@ -474,16 +529,36 @@
       if (m.data.src) {
         registerFilter("fin", "_fin_register");
         const src = m.data.src;
-        const response = await fetch(src);
         var fname = src.split('/').pop();
-        const data = await response.arrayBuffer();
-        FS.writeFile(fname, new Uint8Array(data));
+        let inputArg = fname;
+
+        if (m.data.progressive) {
+          const streamed = await streamSrcToGfio(src, fname);
+          webStreamCtx = streamed.ctx;
+          inputArg = streamed.url;
+        } else {
+          const response = await fetch(src);
+          const data = await response.arrayBuffer();
+          FS.writeFile(fname, new Uint8Array(data));
+        }
+
         args.push("-i");
-        args.push(fname);
+        args.push(inputArg);
       }
 
       if (m.data.transcode) {
-        args = args.concat(m.data.transcode);
+        if (m.data.useWebcodec) {
+          // useWebcodec explicitly requests wcenc: force it as the target
+          // filter for each codec constraint - see the matching comment in
+          // solver_with_webcodecs/loader.js.
+          m.data.transcode.forEach(codec => args.push("wcenc:" + codec));
+          // See the matching comment in solver_with_webcodecs/loader.js:
+          // tells enc_webcodec.c's EM_JS code how many wcenc tracks to
+          // coordinate before releasing any of their output to mp4mx.
+          libgpac.wcencExpectedCount = m.data.transcode.length;
+        } else {
+          args = args.concat(m.data.transcode);
+        }
       }
 
 
@@ -553,7 +628,7 @@
       function call_gpac() {
 
         //FIXME
-        libgpac.gpac_done = params["gpac_done"];
+        module["gpac_done"] = params["gpac_done"];
 
         GPAC.stack = module.stackSave();
         args.unshift("gpac");

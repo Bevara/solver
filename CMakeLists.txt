@@ -33,7 +33,7 @@ SET(SOLVER_SRC
 )
 
 SET(EXTERNAL_RUNTIME
-  "['stringToUTF8','UTF8ToString','stackAlloc','addFunction','allocateUTF8OnStack','stackSave','getTempRet0','setTempRet0','FS','cwrap','ccall','setValue','lengthBytesUTF8']"
+  "['stringToUTF8','UTF8ToString','stackAlloc','addFunction','allocateUTF8OnStack','stackSave','getTempRet0','setTempRet0','FS','cwrap','ccall','setValue','lengthBytesUTF8','HEAPU8']"
 )
 
 add_executable(solver_${VERSION} ${SOLVER_SRC})

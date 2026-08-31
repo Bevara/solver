@@ -251,6 +251,13 @@ u32 getHeight()
 
 void destroy()
 {
-	gf_fs_del(session);
+	/* session can already be NULL/deleted by the time JS calls this -
+	 * see the matching comment in solver_minimal/event.c: gpac.c's own
+	 * main() nulls this global once it tears the session down normally,
+	 * and calling gf_fs_del() again here would double-free it. */
+	if (session) {
+		gf_fs_del(session);
+		session = NULL;
+	}
 	//cleanup_file_io();
 }
