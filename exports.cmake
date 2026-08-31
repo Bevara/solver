@@ -20,6 +20,11 @@ SET(GPAC
     '_main'
 )
 
+SET(COMPOSITOR
+    '_gf_sc_check_sys_frame'
+    '_gf_input_sensor_setup_object'
+)
+
 SET(PTHREADS
     '_pthread_mutex_init'
     '_pthread_mutex_lock'
@@ -123,6 +128,8 @@ SET(STDLIB
     '_fmemopen'
     '_fread'
     '_fclose'
+    '_fiprintf'
+    '_fputc'
 )
 
 SET(EMSCRIPTEN
@@ -141,6 +148,7 @@ SET(SOLVER
 
 SET(EXTERNAL_FN
     ${GPAC}
+    ${COMPOSITOR}
     ${PTHREADS}
     ${ZLIB}
     ${STDLIB}

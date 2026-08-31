@@ -30,6 +30,7 @@ SET(SOLVER_SRC
   stats.c
   gpac.c
   gpac_help.c
+  compositor_tools.c
 )
 
 SET(EXTERNAL_RUNTIME

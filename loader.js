@@ -348,12 +348,21 @@
        * mode calls the handler directly (no structured clone involved). */
       let progressPollTimer = null;
       let progressReadOffset = 0;
-      /* Progressive INPUT download - see the matching, more detailed
-       * comment in solver_with_webcodecs/loader.js. Streams the source
-       * into a GF_FileIO-backed buffer (webstream_* in in_file.c) exposed
-       * to GPAC as a "gfio://..." URL, instead of blocking on the full
-       * fetch()+FS.writeFile below, so GPAC can start reading before the
-       * whole source has downloaded. */
+      /* Progressive INPUT download: mirrors the output-side polling above,
+       * but for the source file. Without this, the plain fetch()+
+       * FS.writeFile path below blocks until the *entire* source has
+       * downloaded before GPAC's pipeline can even start, which defeats
+       * the purpose of progressive/MSE output for large sources - the
+       * player would still wait for e.g. an 876MB 1080p file to finish
+       * downloading before the first frame is produced. Instead, the
+       * source is streamed into a growing buffer backed by GPAC's
+       * GF_FileIO abstraction (see webstream_* in in_file.c) and exposed
+       * to GPAC as a "gfio://..." URL passed as -i: GPAC's fin filter
+       * already knows how to treat a not-yet-complete GF_FileIO source as
+       * "not ready yet, retry" rather than EOF/error (see in_file.c's
+       * gf_fileio_get_stats/eof handling), so the filter session can
+       * start demuxing/transcoding from the bytes that have already
+       * arrived while the rest keeps streaming in the background. */
       let webStreamCtx = null;
       async function streamSrcToGfio(src, fname) {
         const webstream_create = module.cwrap('webstream_create', 'number', ['string']);
@@ -542,27 +551,44 @@
           FS.writeFile(fname, new Uint8Array(data));
         }
 
-        args.push("-i");
-        args.push(inputArg);
+        if (m.data.interactive || m.data.vr) {
+          let interactive_mode = "compositor:player=base:src=" + inputArg;
+          if (m.data.vr) {
+            interactive_mode = interactive_mode + "#VR";
+          }
+          args.push(interactive_mode);
+        } else {
+          args.push("-i");
+          args.push(inputArg);
+        }
       }
 
       if (m.data.transcode) {
+        // A bare codec constraint, not prefixed with a specific filter
+        // name. GPAC's normal filter-graph resolution then picks whichever
+        // AVC-capable filter is actually registered and connects - "wcenc"
+        // only if useWebcodec registered it above, otherwise whatever
+        // encoder is listed in "with" (e.g. libx264_1's encx264). Forcing
+        // "wcenc:" here unconditionally used to hijack that resolution
+        // even when wcenc was never wanted, leaving no video track in the
+        // output.
+        args = args.concat(m.data.transcode);
+
         if (m.data.useWebcodec) {
-          // useWebcodec explicitly requests wcenc: force it as the target
-          // filter for each codec constraint - see the matching comment in
-          // solver_with_webcodecs/loader.js.
-          m.data.transcode.forEach(codec => args.push("wcenc:" + codec));
-          // See the matching comment in solver_with_webcodecs/loader.js:
-          // tells enc_webcodec.c's EM_JS code how many wcenc tracks to
-          // coordinate before releasing any of their output to mp4mx.
+          // enc_webcodec.c's EM_JS output callback holds back every wcenc
+          // instance's first chunk until this many instances have each
+          // produced one, so mp4mx never receives one track's
+          // init/fragment well ahead of the other's (which MSE rejects
+          // outright).
           libgpac.wcencExpectedCount = m.data.transcode.length;
-        } else {
-          args = args.concat(m.data.transcode);
         }
       }
 
 
-      if (m.data.dst) {
+      if (m.data.interactive || m.data.vr) {
+        registerFilter("aout", "_aout_register");
+        registerFilter("vout", "_vout_register");
+      } else if (m.data.dst) {
         registerFilter("writegen", "_writegen_register");
         registerFilter("fout", "_fout_register");
         args.push("-o");
@@ -628,6 +654,16 @@
       function call_gpac() {
 
         //FIXME
+        libgpac._on_wcdec_error = module.cwrap('wcdec_on_error', null, ['number', 'number', 'string']);
+        libgpac._on_wcdec_frame = module.cwrap('wcdec_on_video', null, ['number', 'bigint', 'string', 'number', 'number']);
+        libgpac._on_wcdec_audio = module.cwrap('wcdec_on_audio', null, ['number', 'bigint', 'string', 'number', 'number', 'number']);
+        libgpac._on_wcdec_flush = module.cwrap('wcdec_on_flush', null, ['number']);
+        libgpac._on_wcdec_frame_copy = module.cwrap('wcdec_on_frame_copy', null, ['number', 'number', 'number']);
+        module["_on_wcdec_error"] = libgpac._on_wcdec_error;
+        module["_on_wcdec_frame"] = libgpac._on_wcdec_frame;
+        module["_on_wcdec_audio"] = libgpac._on_wcdec_audio;
+        module["_on_wcdec_flush"] = libgpac._on_wcdec_flush;
+        module["_on_wcdec_frame_copy"] = libgpac._on_wcdec_frame_copy;
         module["gpac_done"] = params["gpac_done"];
 
         GPAC.stack = module.stackSave();
