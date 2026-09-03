@@ -602,6 +602,9 @@
         registerFilter("aout", "_aout_register");
         registerFilter("vout", "_vout_register");
 
+        // TODO : Added for fluidity, need testing
+        args.push("-step=200");
+
         if (m.data.width != null && m.data.height != null) {
           args.push("vout:wsize=" + m.data.width + "x" + m.data.height);
           args.push("aout");
