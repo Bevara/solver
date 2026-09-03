@@ -336,95 +336,6 @@
       let on_done_resolve = null;
       let on_done_reject = null;
 
-      /* Progressive (MSE) playback: poll the growing output file on the
-       * virtual FS and push newly-written byte ranges to m.data.onProgress
-       * as they appear, instead of waiting for gpac_done to read the whole
-       * file once. Requires the destination to be muxed in fragmented mode
-       * (dst including e.g. ":store=sfrag:cdur=1") so the file is valid to
-       * append incrementally to a SourceBuffer - see setupProgressive in
-       * UniversalFns.ts. Only meaningful in no-worker/ENVIRONMENT_IS_WEB
-       * mode: onProgress is a plain JS function reference passed straight
-       * through the message object, which only works because no-worker
-       * mode calls the handler directly (no structured clone involved). */
-      let progressPollTimer = null;
-      let progressReadOffset = 0;
-      /* Progressive INPUT download: mirrors the output-side polling above,
-       * but for the source file. Without this, the plain fetch()+
-       * FS.writeFile path below blocks until the *entire* source has
-       * downloaded before GPAC's pipeline can even start, which defeats
-       * the purpose of progressive/MSE output for large sources - the
-       * player would still wait for e.g. an 876MB 1080p file to finish
-       * downloading before the first frame is produced. Instead, the
-       * source is streamed into a growing buffer backed by GPAC's
-       * GF_FileIO abstraction (see webstream_* in in_file.c) and exposed
-       * to GPAC as a "gfio://..." URL passed as -i: GPAC's fin filter
-       * already knows how to treat a not-yet-complete GF_FileIO source as
-       * "not ready yet, retry" rather than EOF/error (see in_file.c's
-       * gf_fileio_get_stats/eof handling), so the filter session can
-       * start demuxing/transcoding from the bytes that have already
-       * arrived while the rest keeps streaming in the background. */
-      let webStreamCtx = null;
-      async function streamSrcToGfio(src, fname) {
-        const webstream_create = module.cwrap('webstream_create', 'number', ['string']);
-        const webstream_get_url = module.cwrap('webstream_get_url', 'string', ['number']);
-        const webstream_push = module.cwrap('webstream_push', null, ['number', 'number', 'number']);
-        const webstream_done = module.cwrap('webstream_done', null, ['number', 'bigint']);
-
-        const wsCtx = webstream_create(fname);
-        const gfioUrl = webstream_get_url(wsCtx);
-
-        const response = await fetch(src);
-        const contentLength = Number(response.headers.get('Content-Length') || 0);
-
-        function pushChunk(u8) {
-          if (!u8 || !u8.length) return;
-          // Heap allocation, not ccall's 'array' arg type - that copies
-          // through the WASM *stack* (default 64KB), which overflows for
-          // fetch chunks that can be hundreds of KB.
-          const ptr = module._malloc(u8.length);
-          module.HEAPU8.set(u8, ptr);
-          webstream_push(wsCtx, ptr, u8.length);
-          module._free(ptr);
-        }
-
-        (async () => {
-          try {
-            if (response.body && response.body.getReader) {
-              const reader = response.body.getReader();
-              for (; ;) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                pushChunk(value);
-              }
-            } else {
-              pushChunk(new Uint8Array(await response.arrayBuffer()));
-            }
-          } catch (e) {
-            console.log('progressive input download failed: ' + e.message);
-          }
-          webstream_done(wsCtx, BigInt(contentLength));
-        })();
-
-        return { url: gfioUrl, ctx: wsCtx };
-      }
-      function flushProgressive() {
-        if (!m.data.dst || !m.data.onProgress) return;
-        try {
-          const st = FS.stat(m.data.dst);
-          if (st.size > progressReadOffset) {
-            const fd = FS.open(m.data.dst, 'r');
-            const chunk = new Uint8Array(st.size - progressReadOffset);
-            FS.read(fd, chunk, 0, chunk.length, progressReadOffset);
-            FS.close(fd);
-            progressReadOffset = st.size;
-            m.data.onProgress(chunk);
-          }
-        } catch (e) { /* file not created yet, or transient FS state - retry next tick */ }
-      }
-      if (m.data.progressive && m.data.onProgress) {
-        progressPollTimer = setInterval(flushProgressive, 200);
-      }
-
       params["gpac_done"] = (code) => {
         //const props  = getProperty(["width", "height"]);
         if (code) console.log('(exit code ' + code + ')');
@@ -432,18 +343,7 @@
           "exit_code": code
         };
 
-        if (progressPollTimer) {
-          clearInterval(progressPollTimer);
-          flushProgressive();
-          if (m.data.onProgressDone) m.data.onProgressDone();
-        }
-
-        if (webStreamCtx) {
-          module.cwrap('webstream_destroy', null, ['number'])(webStreamCtx);
-          webStreamCtx = null;
-        }
-
-        if (m.data.dst && !m.data.progressive) {
+        if (m.data.dst) {
           try {
             const res = FS.readFile(m.data.dst, { encoding: "binary" });
             if (m.data.mime_type) {
@@ -536,30 +436,17 @@
       registerFilter("compositor", "_compositor_register");
 
       if (m.data.src) {
-        registerFilter("fin", "_fin_register");
-        const src = m.data.src;
-        var fname = src.split('/').pop();
-        let inputArg = fname;
-
-        if (m.data.progressive) {
-          const streamed = await streamSrcToGfio(src, fname);
-          webStreamCtx = streamed.ctx;
-          inputArg = streamed.url;
-        } else {
-          const response = await fetch(src);
-          const data = await response.arrayBuffer();
-          FS.writeFile(fname, new Uint8Array(data));
-        }
+        registerFilter("httpin", "_httpin_register");
 
         if (m.data.interactive || m.data.vr) {
-          let interactive_mode = "compositor:player=base:src=" + inputArg;
+          let interactive_mode = "compositor:player=base:src=" + m.data.src;
           if (m.data.vr) {
             interactive_mode = interactive_mode + "#VR";
           }
           args.push(interactive_mode);
         } else {
           args.push("-i");
-          args.push(inputArg);
+          args.push(m.data.src);
         }
       }
 
@@ -592,11 +479,6 @@
         registerFilter("writegen", "_writegen_register");
         registerFilter("fout", "_fout_register");
         args.push("-o");
-        /* m.data.dst itself must stay a plain filename - it's also used
-         * as-is for FS.stat/FS.readFile (see flushProgressive above and
-         * gpac_done below). Fragmentation options for progressive/MSE
-         * playback go in the separate dst_opts field so they only affect
-         * the muxer argument, not the virtual FS path being read back. */
         args.push(m.data.dst_opts ? (m.data.dst + ":" + m.data.dst_opts) : m.data.dst);
       } else if (m.data.vbench == false) {
         registerFilter("aout", "_aout_register");
