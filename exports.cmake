@@ -16,7 +16,9 @@ SET(GPAC
     '_webgrab_register'
     '_resample_register'
     '_reframer_register'
+    '_mp4mx_register'
     '_compositor_register'
+    '_dasher_register'
     '_main'
 )
 
@@ -146,8 +148,24 @@ SET(SOLVER
     '_destroy'
 )
 
+# Chargeur SEI : appele par reframe_nalu.c depuis gpac 26.08, donc importe par
+# isobmff_1 et h264bsd_1 alors que le module principal ne l'exportait pas
+# (Aborted: undefined symbol 'gf_sei_loader_new').
+# N'ajouter ici qu'un symbole reellement importe par un module lateral : un
+# export superflu force le lien d'objets supplementaires et peut introduire
+# des entrees GOT irresolvables qui cassent le chargement de tous les modules.
+SET(GPAC_SIDE_API
+    '_gf_sei_loader_new'
+    '_gf_sei_loader_del'
+    '_gf_sei_init_from_avc'
+    '_gf_sei_init_from_hevc'
+    '_gf_sei_init_from_vvc'
+    '_gf_sei_load_from_state'
+)
+
 SET(EXTERNAL_FN
     ${GPAC}
+    ${GPAC_SIDE_API}
     ${COMPOSITOR}
     ${PTHREADS}
     ${ZLIB}
