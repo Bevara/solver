@@ -336,6 +336,58 @@
       let on_done_resolve = null;
       let on_done_reject = null;
 
+      /* Lecture progressive par Media Source Extensions.
+       *
+       * Au lieu de muxer un fichier unique et de rendre un seul blob a la fin,
+       * on fait ecrire au dasher un segment d'initialisation puis des segments
+       * numerotes dans le FS virtuel, et on remet chacun a m.data.onProgress
+       * des qu'il est complet - c'est ce que l'appelant pousse dans un
+       * SourceBuffer.
+       *
+       * Modele sur l'exemple de la console WASM de gpac
+       *   gpac -i <url> dashin:forward=file -o 'dump/$File$':dynext
+       * un fichier par segment, ecrit puis ferme.
+       *
+       * Un segment n'est considere complet que lorsque le dasher est passe au
+       * suivant - ou, pour le dernier, a la fin de session. C'est deterministe,
+       * contrairement a une heuristique sur la taille du fichier. */
+      const SEG_DIR = "dash";
+      const SEG_INIT = SEG_DIR + "/seg_init.mp4";
+      let segTimer = null, segNext = 1, segInitDone = false;
+
+      function segExists(path) {
+        try { FS.stat(path); return true; } catch (e) { return false; }
+      }
+      function segPush(path) {
+        const data = FS.readFile(path, { encoding: "binary" });
+        m.data.onProgress(data);
+        /* le FS virtuel vit dans la memoire du module : on libere chaque
+         * segment une fois remis, sinon un transcodage long garderait toute
+         * la sortie en memoire */
+        try { FS.unlink(path); } catch (e) {}
+      }
+      function segFlush(final) {
+        if (!m.data.onProgress) return;
+        if (!segInitDone) {
+          if (!segExists(SEG_INIT)) return;
+          segPush(SEG_INIT);
+          segInitDone = true;
+        }
+        for (;;) {
+          const cur = SEG_DIR + "/seg_" + segNext + ".m4s";
+          if (!segExists(cur)) break;
+          if (!final && !segExists(SEG_DIR + "/seg_" + (segNext + 1) + ".m4s")) break;
+          segPush(cur);
+          segNext++;
+        }
+      }
+      if (m.data.progressive && m.data.onProgress) {
+        try { FS.mkdir(SEG_DIR); } catch (e) {}
+        segTimer = setInterval(() => segFlush(false), 200);
+      }
+
+
+
       params["gpac_done"] = (code) => {
         //const props  = getProperty(["width", "height"]);
         if (code) console.log('(exit code ' + code + ')');
@@ -343,7 +395,17 @@
           "exit_code": code
         };
 
-        if (m.data.dst) {
+        if (segTimer) {
+          clearInterval(segTimer);
+          segTimer = null;
+          //le dernier segment n'a pas de successeur : la fin de session fait foi
+          segFlush(true);
+          if (m.data.onProgressDone) m.data.onProgressDone();
+        }
+
+        //in progressive mode the element is already fed through the SourceBuffer,
+        //there is no final blob to hand back
+        if (m.data.dst && !m.data.progressive) {
           try {
             const res = FS.readFile(m.data.dst, { encoding: "binary" });
             if (m.data.mime_type) {
@@ -433,12 +495,19 @@
       // Reframer and resampler
       registerFilter("reframer", "_reframer_register");
       registerFilter("resample", "_resample_register");
-      registerFilter("compositor", "_compositor_register");
+
+      /* Le dasher n'est charge que pour une sortie video progressive : c'est lui
+       * qui decoupe le flux en segments ecrits un a un dans le FS virtuel, que
+       * segFlush() ci-dessus remet a MSE au fur et a mesure. */
+      if (m.data.progressive) {
+        registerFilter("dasher", "_dasher_register");
+      }
 
       if (m.data.src) {
         registerFilter("httpin", "_httpin_register");
 
         if (m.data.interactive || m.data.vr) {
+          registerFilter("compositor", "_compositor_register");
           let interactive_mode = "compositor:player=base:src=" + m.data.src;
           if (m.data.vr) {
             interactive_mode = interactive_mode + "#VR";
@@ -446,7 +515,11 @@
           args.push(interactive_mode);
         } else {
           args.push("-i");
-          args.push(m.data.src);
+          /* #Representation=1 place toutes les pistes dans une seule
+           * representation DASH, donc un seul SourceBuffer cote MSE au lieu
+           * d'un par piste. ":gpac:" est le mot-cle d'echappement documente
+           * pour les URL - sans lui les options resteraient collees a l'URL. */
+          args.push(m.data.progressive ? (m.data.src + ":gpac:#Representation=1") : m.data.src);
         }
       }
 
@@ -459,7 +532,14 @@
         // "wcenc:" here unconditionally used to hijack that resolution
         // even when wcenc was never wanted, leaving no video track in the
         // output.
-        args = args.concat(m.data.transcode);
+        /* En mode progressif, chaque segment doit pouvoir commencer sur une
+         * image cle : sans cela le dasher ne peut couper qu'au GOP (250 images
+         * par defaut chez x264, soit 10 s) et signale une derive croissante.
+         * gopdur exprime l'intervalle en secondes, independamment de la cadence. */
+        const constraints = m.data.progressive
+          ? m.data.transcode.map(c => c === "c=avc" ? ("c=avc:gopdur=" + (m.data.seg_dur || 1)) : c)
+          : m.data.transcode;
+        args = args.concat(constraints);
 
         if (m.data.useWebcodec) {
           // enc_webcodec.c's EM_JS output callback holds back every wcenc
@@ -479,7 +559,21 @@
         registerFilter("writegen", "_writegen_register");
         registerFilter("fout", "_fout_register");
         args.push("-o");
-        args.push(m.data.dst_opts ? (m.data.dst + ":" + m.data.dst_opts) : m.data.dst);
+        if (m.data.progressive) {
+          /* profile=live rend chaque segment autonome. Le gabarit est fixe ici
+           * parce que segFlush() ci-dessus parcourt les segments par leur nom.
+           * sbound=closest : couper au SAP le plus proche de la borne plutot que
+           * de l'imposer - MSE n'exige pas des segments de duree egale, seulement
+           * une timeline contigue. stl : timeline de segments, pour decrire les
+           * durees reelles et eviter un faux signalement de derive. */
+          args.push(SEG_DIR + "/live.mpd:profile=live:muxtype=mp4"
+            + ":segdur=" + (m.data.seg_dur || 1)
+            + ":segext=m4s:initext=mp4:template=seg_$Init=init$$Number$"
+            + ":sbound=closest"
+            + ":stl");
+        } else {
+          args.push(m.data.dst_opts ? (m.data.dst + ":" + m.data.dst_opts) : m.data.dst);
+        }
       } else if (m.data.vbench == false) {
         registerFilter("aout", "_aout_register");
         registerFilter("vout", "_vout_register");
