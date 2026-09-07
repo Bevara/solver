@@ -161,6 +161,23 @@ SET(GPAC_SIDE_API
     '_gf_sei_init_from_hevc'
     '_gf_sei_init_from_vvc'
     '_gf_sei_load_from_state'
+
+    # Referenced by the copies of av_parsers.c, bitstream.c and descriptors.c
+    # that the filters compile on their side. Without an explicit export the
+    # linker strips them from the main module and loading the side module
+    # fails at runtime with "resolved is not a function".
+    '_gf_odf_delete_descriptor'
+    '_gf_odf_create_descriptor'
+    '_gf_odf_read_descriptor'
+    '_gf_odf_New_ElemMask'
+    '_gf_bs_is_align'
+    '_gf_bs_mark_overflow'
+    '_gf_bs_log_idx'
+    '_gpp_read_rgba'
+    '_gpp_read_box'
+    '_gpp_read_style'
+    '_oggpack_readinit'
+    '_oggpack_read'
 )
 
 SET(EXTERNAL_FN
