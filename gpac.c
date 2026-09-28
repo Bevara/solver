@@ -346,6 +346,45 @@ void gpac_on_video_swap()
 	window_swap = GF_TRUE;
 }
 
+/*En mode pas a pas (thread principal), gf_fs_is_last_task() rend vrai des que
+la session n'a plus qu'une tache en attente - typiquement la relance de httpin
+qui attend le prochain bloc de fetch(). Sans vsync (vbench) ni sortie audio,
+rien d'autre n'est planifie et la session se terminait apres le premier bloc
+recu (49 images sur 813 pour un Ogg de 4 Mo). On verifie donc qu'aucun fetch
+n'est en cours avant de conclure ; un fetch sans progression pendant
+EM_FETCH_STALL_MS termine quand meme, pour ne jamais rester bloque.*/
+#define EM_FETCH_STALL_MS 5000
+static u32 em_fetch_idle_start = 0;
+static double em_fetch_idle_bytes = -1;
+
+static Bool em_fetch_in_flight(void)
+{
+	double bytes = EM_ASM_DOUBLE({
+		if (typeof libgpac === 'undefined' || !libgpac._fetchers || !libgpac._fetchers.length) return -1;
+		let active = false;
+		let bytes = 0;
+		for (const f of libgpac._fetchers) {
+			if (f._state !== 3 && f._state !== 4) active = true;
+			bytes += (f._bytes || 0);
+		}
+		return active ? bytes : -1;
+	});
+	if (bytes < 0) {
+		em_fetch_idle_start = 0;
+		return GF_FALSE;
+	}
+	u32 now = gf_sys_clock();
+	if (!em_fetch_idle_start || (bytes != em_fetch_idle_bytes)) {
+		em_fetch_idle_start = now;
+		em_fetch_idle_bytes = bytes;
+		return GF_TRUE;
+	}
+	if (now - em_fetch_idle_start < EM_FETCH_STALL_MS) return GF_TRUE;
+	GF_LOG(GF_LOG_WARNING, GF_LOG_APP, ("No data received from fetch for %u ms with an idle session, ending session\n", now - em_fetch_idle_start));
+	em_fetch_idle_start = 0;
+	return GF_FALSE;
+}
+
 static void em_main_loop(void*arg)
 {
 	u32 run = run_steps;
@@ -354,6 +393,7 @@ static void em_main_loop(void*arg)
 		GF_Err e = gf_fs_run(session);
 
 		if (gf_fs_is_last_task(session)) {
+			if (em_fetch_in_flight()) break;
 			gf_fs_stop(session);
 			gpac_done(GF_OK, GF_FALSE);
 			emscripten_cancel_main_loop();

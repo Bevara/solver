@@ -1,4 +1,6 @@
 (async () => {
+
+  const gpacFactory = libgpac;
   const ENVIRONMENT_IS_WEB = typeof window == 'object';
   const ENVIRONMENT_IS_WORKER = typeof importScripts == 'function';
 
@@ -241,7 +243,26 @@
       return JSON.parse(res);
     }
 
+    function memSnapshot(mod) {
+      try {
+        const snap = { heapBytes: mod.HEAPU8.byteLength };
+        if (mod._emscripten_get_sbrk_ptr && mod.HEAPU32) snap.brk = mod.HEAPU32[mod._emscripten_get_sbrk_ptr() >> 2];
+        if (mod.wasmTable) snap.table = mod.wasmTable.length;
+        return snap;
+      } catch (e) { return { error: String(e) }; }
+    }
+
     async function init(m) {
+      /* Horodatage des grandes etapes, remis a l'appelant avec le message
+       * final (message.timings) pour les mesures de performance :
+       *   init        reception du message "init"
+       *   moduleReady solveur instancie, side modules lies, runtime pret
+       *   mainStart   entree dans gpac main() (resolution du graphe + decodage)
+       *   firstSegment premier segment media remis a MSE (progressif seulement)
+       *   done        gpac_done
+       * performance.now() est relatif a l'origine temporelle du contexte (page
+       * ou worker) : timeOrigin permet de recaler sur celle de la page. */
+      const timings = { timeOrigin: performance.timeOrigin, init: performance.now() };
       const params = m.data.module ? m.data.module : {};
       let args = [];
 
@@ -360,6 +381,7 @@
       }
       function segPush(path) {
         const data = FS.readFile(path, { encoding: "binary" });
+        if (timings.firstSegment === undefined && path !== SEG_INIT) timings.firstSegment = performance.now();
         m.data.onProgress(data);
         /* le FS virtuel vit dans la memoire du module : on libere chaque
          * segment une fois remis, sinon un transcodage long garderait toute
@@ -391,8 +413,11 @@
       params["gpac_done"] = (code) => {
         //const props  = getProperty(["width", "height"]);
         if (code) console.log('(exit code ' + code + ')');
+        timings.done = performance.now();
+        timings.memDone = memSnapshot(module);
         const message = {
-          "exit_code": code
+          "exit_code": code,
+          "timings": timings
         };
 
         if (segTimer) {
@@ -429,7 +454,13 @@
       };
 
       try {
-        module = await libgpac(params);
+        module = await gpacFactory(params);
+        timings.moduleReady = performance.now();
+        /* Empreinte memoire une fois les side modules lies : taille de la
+         * memoire lineaire, position du tas (sbrk : tout ce que dlopen et
+         * malloc ont reserve) et taille de la table de fonctions. Le meme
+         * releve est refait a la fin de session (memDone). */
+        timings.mem = memSnapshot(module);
       } catch (e) {
         console.log(e);
         if (ENVIRONMENT_IS_WORKER) {
@@ -503,6 +534,30 @@
         registerFilter("dasher", "_dasher_register");
       }
 
+      /* preload : la source est telechargee entierement dans le FS virtuel
+       * avant la session (comme le fait solver_minimal) et lue par fin plutot
+       * que httpin. Pour les bancs de mesure : la session n'attend plus le
+       * reseau, sa duree reflete le decodage seul (timings.preloadMs = temps
+       * de telechargement, hors mainStart..done). */
+      let src = m.data.src;
+      if (m.data.src && m.data.preload && !m.data.interactive && !m.data.vr) {
+        const t = performance.now();
+        try {
+          const response = await fetch(m.data.src);
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          const data = await response.arrayBuffer();
+          src = "/preload_" + decodeURIComponent(m.data.src.split('/').pop().split('?')[0]).replace(/[^A-Za-z0-9._-]/g, '_');
+          FS.writeFile(src, new Uint8Array(data));
+          timings.preloadMs = performance.now() - t;
+          timings.preloadBytes = data.byteLength;
+          registerFilter("fin", "_fin_register");
+        } catch (e) {
+          //on retombe sur httpin, en le signalant
+          console.log("preload of " + m.data.src + " failed (" + e + "), reading it through httpin instead");
+          src = m.data.src;
+        }
+      }
+
       if (m.data.src) {
         registerFilter("httpin", "_httpin_register");
 
@@ -519,7 +574,7 @@
            * representation DASH, donc un seul SourceBuffer cote MSE au lieu
            * d'un par piste. ":gpac:" est le mot-cle d'echappement documente
            * pour les URL - sans lui les options resteraient collees a l'URL. */
-          args.push(m.data.progressive ? (m.data.src + ":gpac:#Representation=1") : m.data.src);
+          args.push(m.data.progressive ? (src + ":gpac:#Representation=1") : src);
         }
       }
 
@@ -552,7 +607,18 @@
       }
 
 
-      if (m.data.interactive || m.data.vr) {
+      /* Banc de decodage pur, methode documentee par gpac :
+       *   gpac -i src reframer:raw=av -o null
+       * le reframer force le decodage de toutes les pistes et fout jette le
+       * resultat. Pas de vout ni d'aout : rien ne cadence la session, et une
+       * piste sans sortie ne declenche pas le STOP qui, en mode vbench,
+       * interrompait httpin des la premiere piste non connectee. */
+      if (m.data.decodeOnly) {
+        registerFilter("fout", "_fout_register");
+        args.push("reframer:raw=av");
+        args.push("-o");
+        args.push("null");
+      } else if (m.data.interactive || m.data.vr) {
         registerFilter("aout", "_aout_register");
         registerFilter("vout", "_vout_register");
       } else if (m.data.dst) {
@@ -594,8 +660,19 @@
       }
 
       if (m.data.useWebcodec) {
-        registerFilter("wcdec", "_wcdec_register");
-        registerFilter("wcenc", "_wcenc_register");
+        /* wcdec se porte candidat sur toute piste que le resolveur lui
+         * propose, y compris un codec que WebCodecs ne connait pas : sur du
+         * Theora il echoue a l'initialisation ("[WebDec] Failed to initialize
+         * for codec theora") sans rendre la main au decodeur Wasm demande par
+         * "with", et la session part en recursion (pile saturee dans le
+         * worker). webcodecRole permet donc de n'enregistrer que l'encodeur
+         * quand seule la sortie doit passer par WebCodecs :
+         *   use-webcodec       -> "both" (comportement historique)
+         *   use-webcodec="enc" -> wcenc seul
+         *   use-webcodec="dec" -> wcdec seul */
+        const role = m.data.webcodecRole || "both";
+        if (role !== "enc") registerFilter("wcdec", "_wcdec_register");
+        if (role !== "dec") registerFilter("wcenc", "_wcenc_register");
         registerFilter("webgrab", "_webgrab_register");
       }
 
@@ -654,6 +731,7 @@
         //gpac_em_sig_handler(4);
         //setProperty({"graph":m.data.showGraph != null, "report":m.data.showReport  != null, "stats":m.data.showStats  != null})
         try {
+          timings.mainStart = performance.now();
           module["_main"](argc, argv);
         } catch (e) {
           //unwind thrown by emscripten main

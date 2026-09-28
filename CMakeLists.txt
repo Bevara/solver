@@ -34,7 +34,9 @@ SET(SOLVER_SRC
 )
 
 SET(EXTERNAL_RUNTIME
-  "['stringToUTF8','UTF8ToString','stackAlloc','addFunction','allocateUTF8OnStack','stackSave','getTempRet0','setTempRet0','FS','cwrap','ccall','setValue','lengthBytesUTF8','HEAPU8']"
+  # wasmMemory, wasmTable, HEAPU32 : mesure de l'empreinte memoire des side
+  # modules par le chargeur (loader.js, timings.mem)
+  "['stringToUTF8','UTF8ToString','stackAlloc','addFunction','allocateUTF8OnStack','stackSave','getTempRet0','setTempRet0','FS','cwrap','ccall','setValue','lengthBytesUTF8','HEAPU8','HEAPU32','wasmMemory','wasmTable']"
 )
 
 add_executable(solver_${VERSION} ${SOLVER_SRC})

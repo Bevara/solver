@@ -37,6 +37,7 @@ SET(PTHREADS
 )
 
 SET(ZLIB
+    '_emscripten_get_sbrk_ptr'
     '_crc32'
     '_deflateInit2_'
     '_deflate'
