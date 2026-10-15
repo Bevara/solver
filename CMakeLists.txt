@@ -1,7 +1,17 @@
-set (THIRD_PARTIES ${CMAKE_SOURCE_DIR}/filters/third_parties)
-set (THIRD_PARTIES_BINARIES ${CMAKE_BINARY_DIR}/filters/third_parties)
-set (GPAC_LOCATION ${THIRD_PARTIES}/gpac)
-set (GPAC_BINARIES ${THIRD_PARTIES_BINARIES}/gpac)
+cmake_minimum_required(VERSION 3.7)
+
+# Built on its own (bevara publish --build, or emcmake cmake -S . -B build), it
+# sets what the player's top-level CMakeLists.txt sets when it includes this
+# directory with add_subdirectory().
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  project(solver C CXX)
+  if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)    # as the player is configured
+  endif()
+  set(CMAKE_CXX_STANDARD 20)
+  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+  add_definitions(-fpic)
+endif()
 
 set(VERSION "1")
 
@@ -60,6 +70,3 @@ target_link_libraries(solver_${VERSION}
 target_include_directories(solver_${VERSION} PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-
-target_link_directories(solver_${VERSION} PRIVATE
-${GPAC_BINARIES}/bin/gcc)
