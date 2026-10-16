@@ -1,5 +1,6 @@
 {
     "name": "solver",
+    "version": "1.0.1",
     "kind": "runtime",
     "description": "Bevara solver: GPAC filter session with the compositor, WebCodecs, audio/video output and DASH, for <canvas>, <video> and <audio>",
     "help": "The main module that accessors (side modules) link against: pages name it in using=\"solver_1\". It embeds the GPAC filter session and the link resolver, with the compositor, video and audio outputs, WebCodecs, the DASH segmenter and HTTP input; everything else comes from the accessors.",
