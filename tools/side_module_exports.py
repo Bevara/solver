@@ -10,7 +10,7 @@ are imported and exported at once), minus what the JS glue supplies
 where the solver actually defines the symbol - a MAIN_MODULE=1 build of it,
 which exports everything it defines, is the reference for that.
 
-    python3 solver/tools/side_module_exports.py build/dist/mm_solver_1.0.1.wasm build/dist/*_1.wasm
+    python3 solver/tools/side_module_exports.py build/dist/mm_solver_1.0.2.wasm build/dist/*_1.wasm
 
 Prints the symbols with the exports.cmake leading underscore, sorted, ready
 to paste; with -v, also who imports each one. Run it again whenever a filter

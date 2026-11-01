@@ -39,7 +39,7 @@ emcmake cmake .
 emmake make
 ```
 
-Once built, you can use and distribute mm_solver_1.0.1.js and mm_solver_1.0.1.wasm with your universal tags.
+Once built, you can use and distribute mm_solver_1.0.2.js and mm_solver_1.0.2.wasm with your universal tags.
 
 ## Documentation
 
@@ -48,16 +48,16 @@ For more details, please visit our documentation at https://bevara.com/documenta
 ## Publishing it as a runtime
 
 `solver.json` makes this directory a **runtime** for the Bevara registry: the
-main module that accessors link against, named by pages as `using="mm_solver_1.0.1"`.
+main module that accessors link against, named by pages as `using="mm_solver_1.0.2"`.
 
 ```bash
 source <emsdk 6.0.8>/emsdk_env.sh      # third_parties/emsdk_vers.txt
-bevara publish --build                  # builds .bevara/.build/mm_solver_1.0.1.js and .wasm, signs, uploads
+bevara publish --build                  # builds .bevara/.build/mm_solver_1.0.2.js and .wasm, signs, uploads
 ```
 
 The version is the generation (`set(VERSION "1")` in CMakeLists.txt), the
 licence comes from `LICENCE`, and the built-in filters from `loader.js`.
-Filters whose `"using"` names `mm_solver_1.0.1` can only be published once this
+Filters whose `"using"` names `mm_solver_1.0.2` can only be published once this
 runtime is.
 
 ## Provenance of lib/libgpac_static.a

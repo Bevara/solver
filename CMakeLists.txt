@@ -15,7 +15,7 @@ endif()
 
 # Pages name the solver with its whole version, using="mm_solver_<x.y.z>": keep it
 # equal to "version" in mm_solver.json.
-set(VERSION "1.0.1")
+set(VERSION "1.0.2")
 set(MODULE mm_solver_${VERSION})
 
 set(USE_DEBUG "-g")

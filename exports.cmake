@@ -186,7 +186,7 @@ SET(GPAC_SIDE_API
 # for free, and so was everything else libgpac contains, which is what made
 # the module 7.7 MB. Regenerate and diff after adding or rebuilding a filter:
 #
-#   python3 solver/tools/side_module_exports.py build/dist/mm_solver_1.0.1.wasm build/dist/*_1.wasm
+#   python3 solver/tools/side_module_exports.py build/dist/mm_solver_1.0.2.wasm build/dist/*_1.wasm
 #
 SET(SIDE_MODULES
     '__Exit'
