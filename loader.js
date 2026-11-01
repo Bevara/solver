@@ -793,6 +793,6 @@
     const handle_message = await initSolver();
     addEventListener("message", handle_message);
   } else if (ENVIRONMENT_IS_WEB) {
-    window.solver_1 = initSolver;
+    window["@MODULE@"] = initSolver;   // the name of the solver, set by CMakeLists.txt
   }
 })();

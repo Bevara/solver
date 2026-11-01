@@ -10,6 +10,7 @@ static u32 enable_graph = 0;
 static u32 enable_nonConnected = 0;
 static u32 enable_stats = 0;
 static u32 enable_callbck = 0;
+static u32 enable_time = 0;
 
 static void bevara_print_report(GF_FilterSession *fsess, Bool is_init, Bool is_final)
 {
@@ -123,7 +124,8 @@ void checkCallback()
 	}
 	else
 	{
-		gf_fs_enable_reporting(session, GF_FALSE);
+		//the playback position is read from the outputs' reports (getCurrentTime)
+		gf_fs_enable_reporting(session, enable_time ? GF_TRUE : GF_FALSE);
 	}
 }
 
@@ -161,40 +163,112 @@ void printReports(int value)
 	checkCallback();
 }
 
+/* Pausing goes through the speed of the outputs, as gpac's own player does:
+ * vout and aout turn speed 0 into GF_FEVT_PAUSE upstream and stop presenting,
+ * and the next non-zero speed into GF_FEVT_RESUME, so playback carries on
+ * where it was. A STOP sent on their input pids, as was done before, left
+ * vout presenting frames, so the picture never froze. A session without one
+ * of the two outputs only gets a warning for it. */
+static void setOutputSpeed(const char *speed)
+{
+	gf_fs_send_update(session, "vout", NULL, "speed", speed, 0);
+	gf_fs_send_update(session, "aout", NULL, "speed", speed, 0);
+}
+
 void sendPlay()
 {
-	u32 i, count;
-	count = gf_fs_get_filters_count(session);
-	for (i = 0; i < count; i++)
-	{
-		GF_Filter *filter;
-		filter = gf_fs_get_filter(session, i);
-		if (gf_filter_is_sink(filter))
-		{
-			GF_FilterPid *pid = gf_filter_get_ipid(filter, 0);
-			GF_FilterEvent fevt;
-			GF_FEVT_INIT(fevt, GF_FEVT_PLAY, NULL);
-			gf_filter_pid_send_event(pid, &fevt);
-		}
-	}
+	setOutputSpeed("1");
 }
 
 void sendPause()
 {
-	u32 i, count;
-	count = gf_fs_get_filters_count(session);
+	setOutputSpeed("0");
+}
+
+/* Seeking, as gpac's own player does: an update of the outputs' start makes
+ * each send STOP then PLAY from that time upstream. While paused (speed 0),
+ * vout applies it on resume. */
+void sendSeek(const char *start)
+{
+	gf_fs_send_update(session, "vout", NULL, "start", start, 0);
+	gf_fs_send_update(session, "aout", NULL, "start", start, 0);
+}
+
+/* The output of the session registered as `name` (vout, aout), with its
+ * statistics, or NULL. Called with the filters locked. */
+static GF_Filter *findOutput(const char *name, GF_FilterStats *stats)
+{
+	u32 i, count = gf_fs_get_filters_count(session);
 	for (i = 0; i < count; i++)
 	{
-		GF_Filter *filter;
-		filter = gf_fs_get_filter(session, i);
-		if (gf_filter_is_sink(filter))
+		GF_Filter *filter = gf_fs_get_filter(session, i);
+		if (!gf_filter_is_sink(filter) || gf_filter_get_stats(filter, stats) != GF_OK)
+			continue;
+		if (stats->reg_name && !strcmp(stats->reg_name, name))
+			return filter;
+	}
+	return NULL;
+}
+
+/* The time of the last frame (or audio block) an output presented, from the
+ * "time=<cts>/<timescale>" of its report: vout and aout publish it only while
+ * the session reports, which the first call turns on. */
+static Bool outputTime(const char *name, Double *time)
+{
+	GF_FilterStats stats;
+	Bool found = GF_FALSE;
+	gf_fs_lock_filters(session, GF_TRUE);
+	if (findOutput(name, &stats) && stats.status)
+	{
+		const char *at = strstr(stats.status, "time=");
+		u64 cts;
+		u32 timescale;
+		if (at && (sscanf(at, "time=" LLU "/%u", &cts, &timescale) == 2) && timescale)
 		{
-			GF_FilterPid *pid = gf_filter_get_ipid(filter, 0);
-			GF_FilterEvent fevt;
-			GF_FEVT_INIT(fevt, GF_FEVT_STOP, NULL);
-			gf_filter_pid_send_event(pid, &fevt);
+			*time = (Double)cts / timescale;
+			found = GF_TRUE;
 		}
 	}
+	gf_fs_lock_filters(session, GF_FALSE);
+	return found;
+}
+
+//seconds, -1 while unknown
+Double getCurrentTime()
+{
+	Double time;
+	if (!session)
+		return -1;
+	if (!enable_time)
+	{
+		enable_time = 1;
+		checkCallback();
+	}
+	if (outputTime("vout", &time) || outputTime("aout", &time))
+		return time;
+	return -1;
+}
+
+//seconds, -1 when the source does not say (a live stream, a raw stream)
+Double getDuration()
+{
+	const char *outputs[] = {"vout", "aout"};
+	Double duration = -1;
+	u32 i;
+	if (!session)
+		return -1;
+	gf_fs_lock_filters(session, GF_TRUE);
+	for (i = 0; (i < 2) && (duration < 0); i++)
+	{
+		GF_FilterStats stats;
+		GF_Filter *filter = findOutput(outputs[i], &stats);
+		GF_FilterPid *ipid = filter ? gf_filter_get_ipid(filter, 0) : NULL;
+		const GF_PropertyValue *p = ipid ? gf_filter_pid_get_property(ipid, GF_PROP_PID_DURATION) : NULL;
+		if (p && p->value.lfrac.den && p->value.lfrac.num > 0)
+			duration = (Double)p->value.lfrac.num / p->value.lfrac.den;
+	}
+	gf_fs_lock_filters(session, GF_FALSE);
+	return duration;
 }
 
 void sendVolume(const char *vol)

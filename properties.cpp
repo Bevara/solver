@@ -43,6 +43,9 @@ extern "C"
   void sendPlay();
   void sendPause();
   void sendVolume(const char *);
+  void sendSeek(const char *);
+  double getCurrentTime();
+  double getDuration();
   
   
   GF_Filter *gf_fs_get_filter(GF_FilterSession *session, uint32_t idx);
@@ -222,6 +225,15 @@ extern "C"
         else if (strcmp(property, "volume") == 0)
         {
           out.AddMember(Value("volume"), Value(getVolume()), out.GetAllocator());
+        }
+        // playback position and duration in seconds, -1 while unknown
+        else if (strcmp(property, "currentTime") == 0)
+        {
+          out.AddMember(Value("currentTime"), Value(getCurrentTime()), out.GetAllocator());
+        }
+        else if (strcmp(property, "duration") == 0)
+        {
+          out.AddMember(Value("duration"), Value(getDuration()), out.GetAllocator());
         }
         else if (strcmp(property, "registered") == 0)
         {
@@ -430,6 +442,20 @@ extern "C"
       {
         sendPause();
       }
+    }
+
+    // seconds from the start of the source, as a number or a string
+    if (document.HasMember("seek"))
+    {
+      char start[64];
+      if (document["seek"].IsNumber())
+        snprintf(start, sizeof(start), "%f", document["seek"].GetDouble());
+      else
+      {
+        assert(document["seek"].IsString());
+        snprintf(start, sizeof(start), "%s", document["seek"].GetString());
+      }
+      sendSeek(start);
     }
 
     if (document.HasMember("volume"))
