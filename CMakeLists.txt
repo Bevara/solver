@@ -15,8 +15,13 @@ endif()
 
 # Pages name the solver with its whole version, using="mm_solver_<x.y.z>": keep it
 # equal to "version" in mm_solver.json.
-set(VERSION "1.0.2")
+set(VERSION "1.0.3")
 set(MODULE mm_solver_${VERSION})
+# The parent CMakeLists depends on this target by name; exporting it keeps the
+# two from drifting apart when VERSION is bumped (they had: the root still
+# named mm_solver_1.0.1 after this moved to 1.0.2, and CMake refused to
+# generate at all).
+set(SOLVER_TARGET ${MODULE} PARENT_SCOPE)
 
 set(USE_DEBUG "-g")
 set(USE_OPT "-O3")

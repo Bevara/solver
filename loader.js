@@ -667,10 +667,15 @@
          * "with", et la session part en recursion (pile saturee dans le
          * worker). webcodecRole permet donc de n'enregistrer que l'encodeur
          * quand seule la sortie doit passer par WebCodecs :
-         *   use-webcodec       -> "both" (comportement historique)
-         *   use-webcodec="enc" -> wcenc seul
-         *   use-webcodec="dec" -> wcdec seul */
-        const role = m.data.webcodecRole || "both";
+         *   use-webcodec       -> "enc" (defaut) : seul l'encodeur
+         *   use-webcodec="dec" -> wcdec seul
+         *   use-webcodec="both"-> les deux (comportement historique)
+         *
+         * Le defaut est "enc" : dans l'usage vise - transcoder vers un
+         * format que le navigateur lit - c'est la sortie qui doit passer
+         * par WebCodecs, et wcdec ne fait que disputer l'entree aux
+         * decodeurs Wasm demandes explicitement par "with". */
+        const role = m.data.webcodecRole || "enc";
         if (role !== "enc") registerFilter("wcdec", "_wcdec_register");
         if (role !== "dec") registerFilter("wcenc", "_wcenc_register");
         registerFilter("webgrab", "_webgrab_register");
