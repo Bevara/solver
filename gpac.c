@@ -385,6 +385,32 @@ static Bool em_fetch_in_flight(void)
 	return GF_FALSE;
 }
 
+/* WebCodecs runs outside GPAC's scheduler: frames handed to a VideoEncoder or
+ * VideoDecoder come back through a JS callback, so while the browser is busy
+ * GPAC has no task of its own and no fetch in flight either - the source is
+ * already downloaded. The loop below would then call the session finished and
+ * stop it while the encoder still holds frames, which truncated every long
+ * transcode (a 33 s Ogg came out one second long; the same clip cut to 4 s
+ * came out whole, which is what made this hard to see). Ask the browser what
+ * it still owes before concluding. */
+static Bool em_webcodec_in_flight(void)
+{
+	return (Bool) EM_ASM_INT({
+		if (typeof libgpac === 'undefined') return 0;
+		for (const arr of [libgpac._web_encs, libgpac._web_decs]) {
+			if (!Array.isArray(arr)) continue;
+			for (const c of arr) {
+				if (!c) continue;
+				if (c._flushing) return 1;
+				const codec = c.enc || c.dec;
+				if (!codec) continue;
+				if (codec.encodeQueueSize || codec.decodeQueueSize) return 1;
+			}
+		}
+		return 0;
+	});
+}
+
 static void em_main_loop(void*arg)
 {
 	u32 run = run_steps;
@@ -394,6 +420,7 @@ static void em_main_loop(void*arg)
 
 		if (gf_fs_is_last_task(session)) {
 			if (em_fetch_in_flight()) break;
+			if (em_webcodec_in_flight()) break;
 			gf_fs_stop(session);
 			gpac_done(GF_OK, GF_FALSE);
 			emscripten_cancel_main_loop();

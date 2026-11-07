@@ -39,7 +39,7 @@ emcmake cmake .
 emmake make
 ```
 
-Once built, you can use and distribute mm_solver_1.0.2.js and mm_solver_1.0.2.wasm with your universal tags.
+Once built, you can use and distribute mm_solver_1.0.4.js and mm_solver_1.0.4.wasm with your universal tags.
 
 ## Documentation
 
@@ -48,23 +48,33 @@ For more details, please visit our documentation at https://bevara.com/documenta
 ## Publishing it as a runtime
 
 `solver.json` makes this directory a **runtime** for the Bevara registry: the
-main module that accessors link against, named by pages as `using="mm_solver_1.0.2"`.
+main module that accessors link against, named by pages as `using="mm_solver_1.0.4"`.
 
 ```bash
-source <emsdk 6.0.8>/emsdk_env.sh      # third_parties/emsdk_vers.txt
-bevara publish --build                  # builds .bevara/.build/mm_solver_1.0.2.js and .wasm, signs, uploads
+source <emsdk 7.0.0>/emsdk_env.sh      # third_parties/emsdk_vers.txt
+bevara publish --build                  # builds .bevara/.build/mm_solver_1.0.4.js and .wasm, signs, uploads
 ```
 
 The version is the generation (`set(VERSION "1")` in CMakeLists.txt), the
 licence comes from `LICENCE`, and the built-in filters from `loader.js`.
-Filters whose `"using"` names `mm_solver_1.0.2` can only be published once this
+Filters whose `"using"` names `mm_solver_1.0.4` can only be published once this
 runtime is.
 
 ## Provenance of lib/libgpac_static.a
 
-The static GPAC library is prebuilt. It reports `GPAC 26.08-DEV` with the
-revision string `release`, so the exact GPAC commit is not recorded in the
-binary. It is presumably built from the player's GPAC tree
-(`filters/third_parties/gpac`, commit 5a9988d13 at the time of writing) -
-**to confirm**, with the configure options, before relying on a published
-build for compliance.
+The static GPAC library is prebuilt and checked in. It no longer has unknown
+provenance: it is built from this repo's own GPAC tree
+(`filters/third_parties/gpac`, branch `raw`, commit ac8085445) with
+
+```bash
+emconfigure <gpac>/configure --enable-pic --use-xvid=no --disable-qjs \
+  --use-png=no --use-jpeg=no --disable-ogg --use-vorbis=no \
+  --extra-libs=-sERROR_ON_UNDEFINED_SYMBOLS=0
+emmake make lib
+cp bin/gcc/libgpac_static.a <player>/solver/lib/
+```
+
+which is what `filters/third_parties/build_thirdparties.sh` passes, under the
+Emscripten release named in `filters/third_parties/emsdk_vers.txt`. Rebuild it
+and copy it here whenever that tree or that toolchain moves, otherwise the
+solver links yesterday's GPAC.
