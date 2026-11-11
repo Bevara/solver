@@ -1,9 +1,9 @@
 {
     "name": "mm_solver",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "kind": "runtime",
     "description": "Bevara solver: GPAC filter session with the compositor, WebCodecs, audio/video output and DASH, for <canvas>, <video> and <audio>",
-    "help": "The main module that accessors (side modules) link against: pages name it in using=\"mm_solver_1.0.4\". It embeds the GPAC filter session and the link resolver, with the compositor, video and audio outputs, WebCodecs, the DASH segmenter and HTTP input; everything else comes from the accessors.",
+    "help": "The main module that accessors (side modules) link against: pages name it in using=\"mm_solver_1.0.5\". It embeds the GPAC filter session and the link resolver, with the compositor, video and audio outputs, WebCodecs, the DASH segmenter and HTTP input; everything else comes from the accessors.",
     "patents": {
         "status": "royalty-free",
         "note": "GPAC, zlib, SDL, FreeType",
