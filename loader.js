@@ -464,7 +464,14 @@
       } catch (e) {
         console.log(e);
         if (ENVIRONMENT_IS_WORKER) {
-          postMessage({ exit_code: -1, printErr: "WORKER EXCEPTION in libgpac: " + (e.stack || e) });
+          /* The missing symbols travel as data too, when the error carries
+           * them (dylink_report.js), so a tool can show which accessor wants
+           * what without parsing this string. */
+          postMessage({
+            exit_code: -1,
+            printErr: "WORKER EXCEPTION in libgpac: " + (e.stack || e),
+            error: { name: e.name, message: e.message, missingSymbols: e.missingSymbols || null, sideModules: e.sideModules || null }
+          });
         } else if (ENVIRONMENT_IS_WEB) {
           if (on_done_reject) on_done_reject(e);
         }
