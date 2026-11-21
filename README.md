@@ -39,7 +39,7 @@ emcmake cmake .
 emmake make
 ```
 
-Once built, you can use and distribute mm_solver_1.0.5.js and mm_solver_1.0.5.wasm with your universal tags.
+Once built, you can use and distribute mm_solver_1.0.6.js and mm_solver_1.0.6.wasm with your universal tags.
 
 ## Documentation
 
@@ -48,23 +48,23 @@ For more details, please visit our documentation at https://bevara.com/documenta
 ## Publishing it as a runtime
 
 `solver.json` makes this directory a **runtime** for the Bevara registry: the
-main module that accessors link against, named by pages as `using="mm_solver_1.0.5"`.
+main module that accessors link against, named by pages as `using="mm_solver_1.0.6"`.
 
 ```bash
 source <emsdk 7.0.0>/emsdk_env.sh      # third_parties/emsdk_vers.txt
-bevara publish --build                  # builds .bevara/.build/mm_solver_1.0.5.js and .wasm, signs, uploads
+bevara publish --build                  # builds .bevara/.build/mm_solver_1.0.6.js and .wasm, signs, uploads
 ```
 
 The version is the generation (`set(VERSION "1")` in CMakeLists.txt), the
 licence comes from `LICENCE`, and the built-in filters from `loader.js`.
-Filters whose `"using"` names `mm_solver_1.0.5` can only be published once this
+Filters whose `"using"` names `mm_solver_1.0.6` can only be published once this
 runtime is.
 
 ## Provenance of lib/libgpac_static.a
 
 The static GPAC library is prebuilt and checked in. It no longer has unknown
 provenance: it is built from this repo's own GPAC tree
-(`filters/third_parties/gpac`, branch `raw`, commit ac8085445) with
+(`filters/third_parties/gpac`, branch `raw`, commit 5b1fd190e) with
 
 ```bash
 emconfigure <gpac>/configure --enable-pic --use-xvid=no --disable-qjs \
@@ -103,3 +103,16 @@ A new runtime version is added to an accessor's list in one of two ways only:
 `WebAssembly.Module.exports/imports` on both binaries before any list was
 touched. What changed between the two is inside the main module (the
 emscripten download manager), which a side module never links.
+
+1.0.6 changes the WebCodecs encoder (`wcenc`), also inside the main module:
+it no longer starves the browser while `isConfigSupported()` answers - a
+session used to be cut after 100000 empty passes, which lost every MPEG-1
+program stream - and it asks for a resampler when the AAC encoder is handed a
+rate it refuses (Chrome takes 44100 and 48000 Hz only). Its surface is checked
+the same way against 1.0.5 before any list is extended.
+
+A surface check does not see everything, though: structures a side module
+reads from memory the main module filled (`GF_HEVCConfig`, for instance) are
+not part of it. They come from the same GPAC headers on both sides as long as
+an accessor's `include/gpac` matches `filters/third_parties/gpac/include` -
+compare them when GPAC moves.
