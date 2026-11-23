@@ -39,7 +39,7 @@ emcmake cmake .
 emmake make
 ```
 
-Once built, you can use and distribute mm_solver_1.0.6.js and mm_solver_1.0.6.wasm with your universal tags.
+Once built, you can use and distribute mm_solver_1.0.7.js and mm_solver_1.0.7.wasm with your universal tags.
 
 ## Documentation
 
@@ -48,23 +48,23 @@ For more details, please visit our documentation at https://bevara.com/documenta
 ## Publishing it as a runtime
 
 `solver.json` makes this directory a **runtime** for the Bevara registry: the
-main module that accessors link against, named by pages as `using="mm_solver_1.0.6"`.
+main module that accessors link against, named by pages as `using="mm_solver_1.0.7"`.
 
 ```bash
 source <emsdk 7.0.0>/emsdk_env.sh      # third_parties/emsdk_vers.txt
-bevara publish --build                  # builds .bevara/.build/mm_solver_1.0.6.js and .wasm, signs, uploads
+bevara publish --build                  # builds .bevara/.build/mm_solver_1.0.7.js and .wasm, signs, uploads
 ```
 
 The version is the generation (`set(VERSION "1")` in CMakeLists.txt), the
 licence comes from `LICENCE`, and the built-in filters from `loader.js`.
-Filters whose `"using"` names `mm_solver_1.0.6` can only be published once this
+Filters whose `"using"` names `mm_solver_1.0.7` can only be published once this
 runtime is.
 
 ## Provenance of lib/libgpac_static.a
 
 The static GPAC library is prebuilt and checked in. It no longer has unknown
 provenance: it is built from this repo's own GPAC tree
-(`filters/third_parties/gpac`, branch `raw`, commit 5b1fd190e) with
+(`filters/third_parties/gpac`, branch `raw`, commit aed21fc0d) with
 
 ```bash
 emconfigure <gpac>/configure --enable-pic --use-xvid=no --disable-qjs \
@@ -110,6 +110,13 @@ session used to be cut after 100000 empty passes, which lost every MPEG-1
 program stream - and it asks for a resampler when the AAC encoder is handed a
 rate it refuses (Chrome takes 44100 and 48000 Hz only). Its surface is checked
 the same way against 1.0.5 before any list is extended.
+
+1.0.7 gives `wcenc` the `gopdur` option `encx264` already has, so the
+`c=avc:gopdur=1` that progressive playback asks for reaches the WebCodecs
+encoder too; before, it was ignored, a single key frame came out and the
+first DASH segment only arrived once the whole file was transcoded. `fintra`
+still works and wins when both are set. Only `src/filters/enc_webcodec.c`
+moved, no header, and the surface is identical to 1.0.6.
 
 A surface check does not see everything, though: structures a side module
 reads from memory the main module filled (`GF_HEVCConfig`, for instance) are
